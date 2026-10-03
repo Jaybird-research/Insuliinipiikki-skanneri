@@ -185,7 +185,7 @@ async function lookup(raw){
 }
 
 /* ---------- Kamera ---------- */
-let stream=null,scanning=false;
+let stream=null,scanning=false,busy=false,lastCode=null,lastAt=0;
 function stopCam(){scanning=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;$('#cam').hidden=true;$('#scan').textContent='Skannaa kameralla'}
 async function startCam(){
   if(scanning){stopCam();return}
@@ -193,12 +193,27 @@ async function startCam(){
   try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})}
   catch(e){status('Kameraa ei voitu avata. Se vaatii https-osoitteen ja luvan.');return}
   const v=$('#cam');v.srcObject=stream;v.hidden=false;await v.play();
-  $('#scan').textContent='Sulje kamera';scanning=true;status('Osoita kamera viivakoodiin.');
+  $('#scan').textContent='Sulje kamera';scanning=true;busy=false;lastCode=null;lastAt=0;
+  status('Osoita kamera viivakoodiin.');
   const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});
   const loop=async()=>{
     if(!scanning)return;
-    try{const c=await det.detect(v);if(c.length){const val=c[0].rawValue;stopCam();$('#code').value=val;lookup(val);return}}catch(e){}
-    requestAnimationFrame(loop);
+    if(busy){requestAnimationFrame(loop);return}
+    try{
+      const c=await det.detect(v);
+      if(c.length){
+        const val=c[0].rawValue,now=Date.now();
+        // sama koodi ei laukaise uudestaan 4 s sisällä, jotta edellinen tuote ei jää jauhamaan silmukkaa
+        if(val!==lastCode||now-lastAt>4000){
+          lastCode=val;lastAt=now;busy=true;
+          $('#code').value=val;
+          status('Löytyi: '+val+' – haetaan…');
+          await lookup(val);
+          if(scanning){busy=false;status('Osoita kamera seuraavaan viivakoodiin.')}
+        }
+      }
+    }catch(e){}
+    if(scanning)requestAnimationFrame(loop);
   };
   loop();
 }
