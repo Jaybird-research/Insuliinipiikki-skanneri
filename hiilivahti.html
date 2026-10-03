@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hiilivahti</title>
+<style>
+:root{--bg:#f2f5f3;--ink:#13201a;--mute:#5b6b63;--card:#fff;--line:#d6dfda;--green:#1b8350;--amber:#b87400;--red:#c23a2b;--poly:#2f6db5;--btn:#13201a;--btnink:#f2f5f3}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1713;--ink:#e8f0eb;--mute:#93a49a;--card:#17221c;--line:#2a3a31;--green:#4cc486;--amber:#e5a63a;--red:#ef6b5b;--poly:#6aa3e8;--btn:#e8f0eb;--btnink:#0f1713}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:560px;margin:0 auto;padding:22px 16px 56px}
+h1{font-size:1.6rem;margin:0 0 2px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 18px;font-size:.95rem}
+.row{display:flex;gap:8px}
+input,textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}
+textarea{min-height:90px;resize:vertical}
+button{padding:12px 16px;border:0;border-radius:8px;background:var(--btn);color:var(--btnink);font:inherit;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--poly);outline-offset:2px}
+#cam{width:100%;max-height:260px;margin-top:10px;border-radius:8px;background:#000;object-fit:cover}
+#status{min-height:1.5em;margin:10px 0;color:var(--mute);font-size:.95rem}
+details{margin:12px 0;border:1px solid var(--line);border-radius:8px;background:var(--card);padding:10px 14px}
+summary{cursor:pointer;font-weight:600}
+label{display:block;margin:10px 0 4px;font-size:.9rem;color:var(--mute)}
+.grid2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.demo{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.demo button{font-size:.85rem;padding:8px 12px}
+#out{margin-top:18px}
+.verdict{border-left:8px solid var(--c);padding:6px 0 6px 14px;margin-bottom:14px}
+.verdict b{display:block;font-size:2rem;line-height:1.15;color:var(--c);letter-spacing:-.02em}
+.verdict span{color:var(--mute);font-size:.95rem}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+.stats div{background:var(--card);padding:10px 12px}
+.stats small{display:block;color:var(--mute);font-size:.78rem}
+.stats strong{font-size:1.1rem}
+.notes p{margin:8px 0}
+.foot{margin-top:22px;color:var(--mute);font-size:.8rem}
+</style>
+</head>
+<body>
+<main>
+<h1>Hiilivahti</h1>
+<p class="sub">Skannaa tai kirjoita viivakoodi. Arvio perustuu hiilihydraattimäärään ja ainesosiin, ei sokerikenttään.</p>
+
+<div class="row">
+  <input id="code" inputmode="numeric" placeholder="Viivakoodi, esim. 6420256016619" aria-label="Viivakoodi">
+  <button id="go">Hae</button>
+</div>
+<div class="row" style="margin-top:8px"><button class="alt" id="scan" style="width:100%">Skannaa kameralla</button></div>
+<video id="cam" hidden playsinline muted></video>
+<div id="status" role="status"></div>
+
+<details id="manual">
+  <summary>Syötä tiedot käsin</summary>
+  <label for="m-name">Tuotteen nimi (valinnainen)</label>
+  <input id="m-name">
+  <div class="grid2">
+    <div><label for="m-carbs">Hiilihydraatit g/100 g</label><input id="m-carbs" inputmode="decimal"></div>
+    <div><label for="m-fiber">Kuitu g/100 g</label><input id="m-fiber" inputmode="decimal"></div>
+    <div><label for="m-poly">Polyolit g/100 g</label><input id="m-poly" inputmode="decimal" placeholder="jos ilmoitettu"></div>
+  </div>
+  <label for="m-ing">Ainesosaluettelo</label>
+  <textarea id="m-ing"></textarea>
+  <div class="row" style="margin-top:10px"><button id="m-go">Arvioi</button></div>
+  <div class="demo">
+    <button class="alt" id="d1">Esimerkki: Sisu Sokeriton</button>
+    <button class="alt" id="d2">Esimerkki: Sisu Hiili</button>
+  </div>
+</details>
+
+<div id="out" aria-live="polite"></div>
+<p class="foot">Tuotetiedot: Open Food Facts (ODbL). Tiedot ovat käyttäjien ylläpitämiä ja voivat olla virheellisiä, joten tarkista pakkauksesta. Arvio on tuotekohtainen eikä ole lääkinnällinen neuvo eikä ennusta oman insuliinivasteesi suuruutta.</p>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=v=>{const n=parseFloat(String(v??'').replace(',','.'));return isNaN(n)?null:n};
+const status=t=>{$('#status').textContent=t};
+
+/* ---------- Ainesosien tunnistus ---------- */
+const RX_POLY=/(maltitol|sorbitol|ksylitol|xylitol|erytritol|erythritol|isomalt|mannitol|laktitol|lactitol)\p{L}*/giu;
+const RX_MOD=/((muunnettu|muunnetta|modifierad)\s+\p{L}*(tärkkelys|stärkelse)\p{L}*|\be14(0[1-9]|[1-4]\d|5[0-2])\b)/giu;
+const RX_FAST=/(glukoosi|glukos|dekstroos|dextros|maltodekstr|maltodextr|dekstriini|dextrin|k[aä]nteissokeri|invertsocker|invertsirap|siirap|sirap|sokeri|socker|fruktoosi|fruktos|vehnäjauho|vetemjöl|ohrajauho|rågmjöl|ruisjauho|riisi|hunaja|honung|melassi|melass|tärkkelys|stärkelse)\p{L}*/giu;
+const RX_NOISE=/(sokerikul|sockerkul|karamelli)\p{L}*(\s*\([^)]*\))?/giu;
+const TAG_POLY=/^en:(maltitol|maltitol-syrup|sorbitol|sorbitol-syrup|xylitol|erythritol|isomalt|mannitol|lactitol|hydrogenated-glucose-syrup|e965\w*|e420\w*|e967|e968|e953|e966|e964)$/;
+const TAG_MOD=/^en:(modified-[\w-]*starch|e14(0[1-9]|[1-4]\d|5[0-2])\w*)$/;
+const TAG_FAST=/^en:(glucose-syrup|glucose-fructose-syrup|fructose-glucose-syrup|maltodextrin|dextrose|glucose|invert-sugar|invert-sugar-syrup|sugar|sucrose|cane-sugar|wheat-flour|flour|rice-flour|corn-flour|potato-starch|corn-starch|starch|rice|honey|fructose|molasses|dextrin|e1400)$/;
+
+function scanText(t){
+  t=(t||'').toLowerCase().replace(RX_NOISE,' ');
+  const r={fast:[],poly:[],mod:[],first:null};
+  const pos=[];
+  const take=(rx,key)=>{t=t.replace(rx,(m,...a)=>{const i=a[a.length-2];r[key].push(m.trim());pos.push([i,m.trim()]);return ' '.repeat(m.length)})};
+  take(RX_MOD,'mod');take(RX_POLY,'poly');take(RX_FAST,'fast');
+  pos.sort((a,b)=>a[0]-b[0]);
+  const f=pos.find(p=>!r.mod.includes(p[1]));
+  r.first=f?f[1]:null;
+  for(const k of ['fast','poly','mod'])r[k]=[...new Set(r[k])];
+  return r;
+}
+function scanTags(tags){
+  const r={fast:[],poly:[],mod:[]};
+  for(const g of tags||[]){
+    const n=g.replace(/^en:/,'').replace(/-/g,' ');
+    if(TAG_POLY.test(g))r.poly.push(n);
+    else if(TAG_MOD.test(g))r.mod.push(n);
+    else if(TAG_FAST.test(g))r.fast.push(n);
+  }
+  return r;
+}
+function classify(text,tags){
+  const a=scanText(text),b=scanTags(tags);
+  for(const k of ['fast','poly','mod'])if(!a[k].length)a[k]=b[k];
+  return a;
+}
+
+/* ---------- Arvio ---------- */
+function judge(p,f){
+  if(p.carbs==null)return {level:'unk'};
+  const polyUnknown=f.poly.length>0&&p.polyols==null;
+  const net=Math.max(0,p.carbs-(p.fiber||0)-(p.polyols||0));
+  const fast=f.fast.length>0;
+  let level=net>=15?'red':net>=5?'amber':'green';
+  if(fast&&net>=10)level='red';
+  else if(fast&&net>=3&&level==='green')level='amber';
+  if(polyUnknown&&!fast)level='poly';
+  else if(f.poly.length&&level==='green'&&(p.polyols??0)>=10)level='poly';
+  return {level,net,polyUnknown};
+}
+const LV={
+  green:['Matala','var(--green)','Vähän sulavia hiilihydraatteja, eikä nopeita lähteitä.'],
+  amber:['Kohtalainen','var(--amber)','Sulavia hiilihydraatteja on selvästi, tai mukana on nopea lähde.'],
+  red:['Korkea','var(--red)','Paljon sulavia hiilihydraatteja tai nopea lähde hallitsee.'],
+  poly:['Osittain imeytyvä','var(--poly)','Hiilihydraatit ovat pääosin polyoleja. Ne imeytyvät vain osin, mutta vaste ei ole nolla.'],
+  unk:['Ei tarpeeksi tietoa','var(--mute)','Hiilihydraattimäärä puuttuu. Syötä se käsin.']
+};
+const fmt=v=>v==null?'–':(Math.round(v*10)/10).toString().replace('.',',')+' g';
+
+function render(p){
+  const f=classify(p.text,p.tags),j=judge(p,f),[title,color,why]=LV[j.level];
+  const notes=[];
+  if(f.first)notes.push(`Ensimmäinen hiilihydraattilähde ainesosaluettelossa: <b>${esc(f.first)}</b>.`);
+  if(f.fast.length)notes.push(`Nopeasti imeytyviä lähteitä: ${esc(f.fast.join(', '))}.`);
+  if(f.poly.length)notes.push(`Polyoleja: ${esc(f.poly.join(', '))}. ${j.polyUnknown?'Määrää ei ole eritelty, ja se sisältyy hiilihydraattilukuun.':''}`);
+  if(f.mod.length)notes.push(`Muunnettu tärkkelys (${esc(f.mod.join(', '))}): sulavuus riippuu tyypistä, joten tarkista hiilihydraattiarvo.`);
+  if(j.polyUnknown&&f.fast.length)notes.push('Polyolit voivat sisältyä lukuun, joten sulavien hiilihydraattien määrä on yläraja.');
+  if(!p.text&&!(p.tags||[]).length)notes.push('Ainesosatietoa ei ole, joten arvio perustuu vain hiilihydraattilukuun.');
+  if(p.sugars!=null)notes.push(`Sokerit ${fmt(p.sugars)}: kenttä kattaa vain mono- ja disakkaridit, joten sitä ei käytetä arvioon.`);
+  $('#out').innerHTML=`
+    <h2 style="margin:0 0 10px;font-size:1.1rem">${esc(p.name||'Tuote')}</h2>
+    <div class="verdict" style="--c:${color}"><b>${title}</b><span>${why}</span></div>
+    <div class="stats">
+      <div><small>Hiilihydraatit</small><strong>${fmt(p.carbs)}</strong></div>
+      <div><small>Kuitu</small><strong>${fmt(p.fiber)}</strong></div>
+      <div><small>Polyolit</small><strong>${fmt(p.polyols)}</strong></div>
+      <div><small>Sulavat hh${j.polyUnknown?' (yläraja)':''}</small><strong>${j.net==null?'–':fmt(j.net)}</strong></div>
+      <div><small>Proteiini</small><strong>${fmt(p.protein)}</strong></div>
+      <div><small>Rasva</small><strong>${fmt(p.fat)}</strong></div>
+    </div>
+    <div class="notes">${notes.map(n=>`<p>${n}</p>`).join('')}</div>`;
+}
+
+/* ---------- Haku ---------- */
+async function lookup(raw){
+  const code=String(raw).replace(/\D/g,'');
+  if(code.length<8){status('Viivakoodi on liian lyhyt.');return}
+  status('Haetaan…');
+  try{
+    const r=await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,brands,nutriments,ingredients_text,ingredients_text_fi,ingredients_text_sv,ingredients_tags`);
+    const j=await r.json();
+    if(j.status!==1||!j.product){status('Tuotetta ei löydy Open Food Factsista. Syötä tiedot käsin.');$('#manual').open=true;return}
+    const P=j.product,n=P.nutriments||{};
+    const p={
+      name:[P.brands,P.product_name].filter(Boolean).join(' – '),
+      carbs:num(n.carbohydrates_100g),fiber:num(n.fiber_100g),polyols:num(n.polyols_100g),
+      sugars:num(n.sugars_100g),protein:num(n.proteins_100g),fat:num(n.fat_100g),
+      text:P.ingredients_text_fi||P.ingredients_text||P.ingredients_text_sv||'',tags:P.ingredients_tags
+    };
+    status('');
+    if(p.carbs==null){status('Hiilihydraattimäärä puuttuu tietokannasta. Täydennä se käsin.');$('#manual').open=true;$('#m-ing').value=p.text}
+    render(p);
+  }catch(e){status('Haku epäonnistui. Tarkista yhteys tai käytä käsinsyöttöä.')}
+}
+
+/* ---------- Kamera ---------- */
+let stream=null,scanning=false;
+function stopCam(){scanning=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;$('#cam').hidden=true;$('#scan').textContent='Skannaa kameralla'}
+async function startCam(){
+  if(scanning){stopCam();return}
+  if(!('BarcodeDetector' in window)){status('Selain ei tue viivakoodin lukua. Kirjoita koodi käsin.');return}
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})}
+  catch(e){status('Kameraa ei voitu avata. Se vaatii https-osoitteen ja luvan.');return}
+  const v=$('#cam');v.srcObject=stream;v.hidden=false;await v.play();
+  $('#scan').textContent='Sulje kamera';scanning=true;status('Osoita kamera viivakoodiin.');
+  const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});
+  const loop=async()=>{
+    if(!scanning)return;
+    try{const c=await det.detect(v);if(c.length){const val=c[0].rawValue;stopCam();$('#code').value=val;lookup(val);return}}catch(e){}
+    requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+/* ---------- Käsinsyöttö ja esimerkit ---------- */
+function manual(){
+  render({name:$('#m-name').value,carbs:num($('#m-carbs').value),fiber:num($('#m-fiber').value),polyols:num($('#m-poly').value),sugars:null,protein:null,fat:null,text:$('#m-ing').value,tags:[]});
+}
+function demo(name,carbs,fiber,ing,sugars,protein,fat){
+  $('#m-name').value=name;$('#m-carbs').value=carbs;$('#m-fiber').value=fiber;$('#m-poly').value='';$('#m-ing').value=ing;
+  render({name,carbs,fiber,polyols:null,sugars,protein,fat,text:ing,tags:[]});
+}
+$('#go').onclick=()=>lookup($('#code').value);
+$('#code').addEventListener('keydown',e=>{if(e.key==='Enter')lookup(e.target.value)});
+$('#scan').onclick=startCam;
+$('#m-go').onclick=manual;
+$('#d1').onclick=()=>demo('Sisu Sokeriton pastilli',45,0,'Makeutusaineita (maltitolisiirappia, sorbitolisiirappia, sorbitolia, sakariinia), sakeuttamisainetta (arabikumia), lakritsiuutetta, aromeja, kasviöljyjä (kookos, rapsi), väriä (E153).',0,1.1,0.2);
+$('#d2').onclick=()=>demo('Sisu Hiili pippurilaku',86,0,'Sokeria, melassia, vehnäjauhoa, glukoosisiirappia, lakritsiuutetta, kokonaan kovetettua kookosrasvaa, sakeuttamisainetta (arabikumia), kosteudensäilyttäjiä (glyserolia, sorbitolia), ammoniumkloridia, värejä (E153, E150d), liivatetta, aromeja, suolaa, karamellisoitua sokeria.',72,2.2,1.6);
+</script>
+</body>
+</html>
